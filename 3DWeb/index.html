@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<!-- 指定 HTML5 文档类型，告诉浏览器用标准模式解析 -->
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <!-- 页面字符集为 UTF-8，避免中文乱码 -->
+    <title>Three.js 3D Playground — Drag + Vertical Move</title>
+    <!-- 浏览器标签标题 -->
+    <style>
+      /* 页面基础样式 */
+      body {
+        margin: 0; /* 去掉默认外边距，让画布全屏铺满 */
+        background: linear-gradient(
+          135deg,
+          #1e3c72,
+          #2a5298
+        ); /* 渐变背景，增强视觉 */
+        overflow: hidden; /* 隐藏滚动条，避免拖拽时出现滚动 */
+        font-family: 'Segoe UI', sans-serif; /* 全局字体 */
+      }
+      canvas {
+        display: block;
+      } /* 让 WebGL 画布作为块级元素铺满 */
+      /* 顶部标题条样式 */
+      #title {
+        position: fixed;
+        top: 15px;
+        left: 50%;
+        transform: translateX(-50%);
+        /* 固定在顶部中间，transform 用来做水平居中 */
+        background: rgba(255, 255, 255, 0.15);
+        color: #fff;
+        padding: 10px 20px;
+        border-radius: 12px;
+        font-size: 20px;
+        font-weight: bold;
+        backdrop-filter: blur(6px); /* 玻璃拟态的磨砂效果 */
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+        z-index: 10; /* 阴影与层级 */
+      }
+      /* 左下角信息卡片样式 */
+      #infoBox {
+        position: fixed;
+        bottom: 20px;
+        left: 20px;
+        z-index: 10;
+        background: rgba(255, 255, 255, 0.15);
+        color: #fff;
+        padding: 12px 16px;
+        border-radius: 10px;
+        font-size: 14px;
+        display: none; /* 默认隐藏 */
+        backdrop-filter: blur(8px);
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+      }
+      /* 右上角提示条样式 */
+      #hint {
+        position: fixed;
+        right: 16px;
+        top: 16px;
+        z-index: 10;
+        color: #e9f2ff;
+        opacity: 0.95;
+        background: rgba(255, 255, 255, 0.12);
+        padding: 8px 12px;
+        border-radius: 10px;
+        font-size: 12px;
+        backdrop-filter: blur(6px);
+        border: 1px solid rgba(255, 255, 255, 0.18);
+      }
+    </style>
+  </head>
+  <body>
+    <!-- 顶部标题：说明功能 -->
+    <div id="title">✨ Three.js 3D Playground（拖拽 + 竖直移动）</div>
+    <!-- 右上角操作提示：含模式切换提示与高度锁定状态 -->
+    <div id="hint">
+      🖱 拖动物体 · 滚轮缩放 · 双击物体启用操纵杆（W/E/R 切换 移动/旋转/缩放）<br />🔒
+      高度锁定：<span id="lockState">开</span>（按 L 切换）
+    </div>
+    <!-- 左下角信息框：显示选中物体的名称与坐标 -->
+    <div id="infoBox">
+      <b id="objName">Object</b><br />
+      <span id="objPos"></span>
+    </div>
+
+    <!-- three.js r124 核心库（非模块老写法，与你现有环境兼容） -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.124.0/build/three.min.js"></script>
+    <!-- 轨道控制：鼠标拖拽相机 -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.124.0/examples/js/controls/OrbitControls.js"></script>
+    <!-- 拖拽控制：鼠标直接拖动物体 -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.124.0/examples/js/controls/DragControls.js"></script>
+    <!-- 变换控制：带 XYZ 轴操纵杆的控制（移动/旋转/缩放） -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.124.0/examples/js/controls/TransformControls.js"></script>
+
+    <script>
+      // ===== 场景 / 相机 / 渲染器基础搭建 =====
+      const scene = new THREE.Scene(); // 创建一个场景，容纳所有 3D 对象
+
+      const camera = new THREE.PerspectiveCamera( // 透视相机（人眼视角）
+        75, // 视野夹角（FOV）
+        window.innerWidth / window.innerHeight, // 宽高比
+        0.1, // 近裁剪面
+        1000, // 远裁剪面
+      );
+      camera.position.set(4, 4, 6); // 把相机放到(4,4,6) 角度更能看到场景
+
+      const renderer = new THREE.WebGLRenderer({ antialias: true }); // 创建 WebGL 渲染器，开抗锯齿
+      renderer.setSize(window.innerWidth, window.innerHeight); // 设置渲染尺寸为窗口大小
+      document.body.appendChild(renderer.domElement); // 把画布元素插入到页面
+
+      // ===== 轨道控制（OrbitControls）：拖拽旋转、滚轮缩放相机 =====
+      const orbit = new THREE.OrbitControls(camera, renderer.domElement); // 绑定相机与画布
+      orbit.enableDamping = true; // 开启阻尼（惯性效果），交互更顺滑
+
+      // ===== 灯光设置 =====
+      scene.add(new THREE.AmbientLight(0xffffff, 0.4)); // 环境光，柔和照亮整个场景
+      const dirLight = new THREE.DirectionalLight(0xffffff, 0.8); // 平行光，模拟太阳光
+      dirLight.position.set(5, 5, 5); // 光源方向与位置
+      scene.add(dirLight); // 添加到场景
+
+      // ===== 地面与网格 =====
+      const ground = new THREE.Mesh( // 地面：一个大平面
+        new THREE.PlaneGeometry(20, 20), // 20x20 的平面
+        new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.8 }), // 粗糙材质
+      );
+      ground.rotation.x = -Math.PI / 2; // 旋转 -90°，让平面从竖直变成水平地面
+      scene.add(ground); // 加入场景
+
+      const grid = new THREE.GridHelper(20, 20, 0x88a, 0x556); // 地面网格辅助（20格）
+      grid.position.y = 0.001; // 稍微抬高一点，避免与地面 Z 冲突产生闪烁
+      scene.add(grid); // 加入场景
+
+      // ===== 三个可交互的几何体：Cube / Sphere / Cylinder =====
+      const cube = new THREE.Mesh( // 立方体
+        new THREE.BoxGeometry(1, 1, 1), // 几何体：1x1x1
+        new THREE.MeshStandardMaterial({ color: 0x66ccff }), // 标准材质（受光影响）
+      );
+      cube.position.set(-2, 0.5, 0); // 放在地面上方 0.5（刚好半个高度），X=-2
+      cube.name = 'Cube'; // 命名用于 UI 展示
+      const sphere = new THREE.Mesh( // 球体
+        new THREE.SphereGeometry(0.7, 32, 32), // 半径 0.7，细分 32
+        new THREE.MeshStandardMaterial({ color: 0xff7777 }),
+      );
+      sphere.position.set(0, 0.7, 0); // 放在地面上方 0.7（球半径）
+      sphere.name = 'Sphere';
+      const cylinder = new THREE.Mesh( // 圆柱体
+        new THREE.CylinderGeometry(0.6, 0.6, 1.5, 32), // 顶/底半径0.6，高1.5，分段32
+        new THREE.MeshStandardMaterial({ color: 0x88ff88 }),
+      );
+      cylinder.position.set(2, 0.75, 0); // 抬到地面上方 0.75（半高 0.75）
+      cylinder.name = 'Cylinder';
+
+      scene.add(cube, sphere, cylinder); // 一次性加入三个物体
+
+      // ===== 点击拾取：Raycaster + 鼠标规范化坐标 =====
+      const raycaster = new THREE.Raycaster(); // 光线投射器，用来做鼠标拾取
+      const mouse = new THREE.Vector2(); // 存放鼠标的规范化设备坐标（-1~1）
+
+      function updateMouse(e) {
+        // 把屏幕像素坐标转换到 -1~1
+        mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+        mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+      }
+
+      function showInfo(obj) {
+        // 更新左下角信息卡片
+        const info = document.getElementById('infoBox');
+        document.getElementById('objName').textContent = obj.name || 'Object';
+        const p = obj.position;
+        document.getElementById('objPos').textContent = `位置: (${p.x.toFixed(
+          2,
+        )}, ${p.y.toFixed(2)}, ${p.z.toFixed(2)})`;
+        info.style.display = 'block'; // 显示卡片
+      }
+
+      // 画布点击事件：点击对象时显示信息并闪烁
+      renderer.domElement.addEventListener('click', (e) => {
+        if (isTransformDragging) return; // 拖操纵杆期间，不触发点击拾取
+        updateMouse(e); // 更新鼠标 NDC 坐标
+        raycaster.setFromCamera(mouse, camera); // 从相机出发投射一条“拾取光线”
+        const hits = raycaster.intersectObjects(draggable); // 与可拖拽物体求交
+        if (hits.length > 0) {
+          // 若有命中
+          const obj = hits[0].object; // 取最近的那个
+          showInfo(obj); // 更新信息卡
+          const old = obj.material.color.clone(); // 颜色闪烁反馈：先备份原色
+          obj.material.color.set(0xffff00); // 瞬时变黄
+          setTimeout(() => obj.material.color.copy(old), 300); // 300ms 后还原
+          lastSelected = obj; // 记录选中对象（供 TransformControls 使用）
+        }
+      });
+
+      // ===== 拖拽控制（DragControls）：用鼠标拖动物体在平面上移动 =====
+      const draggable = [cube, sphere, cylinder]; // 指定哪些物体可拖拽
+      const drag = new THREE.DragControls(
+        draggable,
+        camera,
+        renderer.domElement,
+      ); // 创建拖拽控制器
+
+      // “高度锁定” 开关：true = 贴地移动，只改 X/Z；false = 屏幕平面拖动（会带一点上下）
+      let lockToGround = true; // 初始开启
+      const lockStateEl = document.getElementById('lockState'); // 右上角状态文本 <span>
+      function setLockUI() {
+        lockStateEl.textContent = lockToGround ? '开' : '关';
+      } // 刷新 UI
+      setLockUI(); // 初始化 UI 显示
+
+      // 每个物体“贴地高度”的基准（半高/半径），用于拖拽时强制 Y 保持恒定
+      const baseY = new Map([
+        [cube, 0.5],
+        [sphere, 0.7],
+        [cylinder, 0.75],
+      ]);
+      let isDragging = false; // 记录是否正在拖拽中（用于暂停演示动画）
+
+      // 鼠标悬停到可拖拽物体上，改变光标形态做提示
+      drag.addEventListener('hoveron', () => {
+        renderer.domElement.style.cursor = 'grab';
+      });
+      drag.addEventListener('hoveroff', () => {
+        renderer.domElement.style.cursor = 'default';
+      });
+
+      // 开始拖拽：禁用相机轨道控制，必要时把物体“吸回”贴地高度
+      drag.addEventListener('dragstart', (e) => {
+        isDragging = true;
+        orbit.enabled = false; // 拖拽时禁用 OrbitControls，避免冲突
+        renderer.domElement.style.cursor = 'grabbing';
+        if (lockToGround)
+          e.object.position.y = baseY.get(e.object) || e.object.position.y;
+      });
+
+      // 拖拽过程：如果高度锁定，就持续把 y 固定在基准高度（只允许 X/Z 改变）
+      drag.addEventListener('drag', (e) => {
+        if (lockToGround)
+          e.object.position.y = baseY.get(e.object) || e.object.position.y;
+      });
+
+      // 拖拽结束：恢复相机控制，显示一次信息卡，并记录“最后选中”
+      drag.addEventListener('dragend', (e) => {
+        isDragging = false;
+        orbit.enabled = true;
+        renderer.domElement.style.cursor = 'default';
+        showInfo(e.object);
+        lastSelected = e.object;
+      });
+
+      // 键盘 L：切换“高度锁定”开关，并更新右上角文本
+      window.addEventListener('keydown', (e) => {
+        if (e.key.toLowerCase() === 'l') {
+          lockToGround = !lockToGround; // 取反
+          setLockUI(); // 刷新 UI
+        }
+      });
+
+      // ===== TransformControls：双击物体出现 XYZ 轴操纵杆（更精确的移动/旋转/缩放）=====
+      const transform = new THREE.TransformControls(
+        camera,
+        renderer.domElement,
+      ); // 创建操纵杆
+      transform.setMode('translate'); // 初始模式为“平移”（W/E/R 可切换）
+      transform.addEventListener('dragging-changed', (ev) => {
+        // 只要拖操纵杆，就禁用相机与拖拽，避免冲突；松手再恢复
+        isTransformDragging = ev.value;
+        orbit.enabled = !ev.value;
+        drag.enabled = !ev.value;
+      });
+      scene.add(transform); // 把控件加进场景（它自己也会渲染 UI）
+
+      let isTransformDragging = false; // 标记是否正通过操纵杆拖动
+      let lastSelected = null; // 记录最近一次点击/拖拽的对象
+
+      // 双击：若双击在物体上，则给该物体挂上操纵杆；双击空白处则移除
+      renderer.domElement.addEventListener('dblclick', (e) => {
+        updateMouse(e); // 更新鼠标 NDC
+        raycaster.setFromCamera(mouse, camera); // 投射拾取光线
+        const hits = raycaster.intersectObjects(draggable); // 看看有没有点到可拖拽物体
+        if (hits.length) {
+          lastSelected = hits[0].object; // 取最近的命中
+          transform.attach(lastSelected); // 把操纵杆“附着”到该物体
+          showInfo(lastSelected); // 更新信息卡
+        } else {
+          transform.detach(); // 双击空白：取消操纵杆
+        }
+      });
+
+      // ===== 动画主循环 =====
+      const clock = new THREE.Clock(); // 计时器，用于做平滑动画（如球体上下浮动）
+      function animate() {
+        requestAnimationFrame(animate); // 浏览器下一帧时再调用 animate（循环）
+
+        const t = clock.getElapsedTime(); // 获取从启动到现在的时间（秒）
+
+        // 演示动画：不在拖拽/操纵时，物体做些轻微动态，场景更生动
+        if (!isDragging && !isTransformDragging) {
+          cube.rotation.x += 0.01; // 立方体自转
+          cube.rotation.y += 0.01;
+          cylinder.rotation.x += 0.005; // 圆柱体慢转
+          // 球体上下浮动：基于正弦函数，围绕它的“贴地高度”上下 0.2
+          sphere.position.y =
+            (baseY.get(sphere) || 0.7) + Math.sin(t * 2) * 0.2;
+        }
+
+        orbit.update(); // 若启用阻尼，需要在渲染前调用 update()
+        renderer.render(scene, camera); // 把这一帧画到画布上
+      }
+      animate(); // 启动动画循环
+
+      // ===== 自适应窗口大小变化 =====
+      window.addEventListener('resize', () => {
+        camera.aspect = window.innerWidth / window.innerHeight; // 更新相机宽高比
+        camera.updateProjectionMatrix(); // 通知相机重算投影矩阵
+        renderer.setSize(window.innerWidth, window.innerHeight); // 调整渲染尺寸
+      });
+
+      // ===== 快捷键：W/E/R 切换 TransformControls 模式 =====
+      window.addEventListener('keydown', (e) => {
+        const k = e.key.toLowerCase(); // 转小写简化比较逻辑
+        if (k === 'w') transform.setMode('translate'); // W 切换“平移”模式
+        if (k === 'e') transform.setMode('rotate'); // E 切换“旋转”模式
+        if (k === 'r') transform.setMode('scale'); // R 切换“缩放”模式
+      });
+    </script>
+  </body>
+</html>
